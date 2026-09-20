@@ -222,9 +222,23 @@ export function createRecallMcpServer(db: Database): McpServer {
   return server;
 }
 
-/** Connects a recall MCP server to stdio; resolves when the transport closes (parent process disconnects). */
+/**
+ * Connects a recall MCP server to stdio and resolves only when the transport closes
+ * (the parent process disconnects). `server.connect()` resolves as soon as the
+ * connection is established, so awaiting it alone would let the caller close the
+ * database while tool calls are still being served against it, silently returning
+ * empty results. Waiting for `transport.onclose` keeps the db open for the server's
+ * whole lifetime.
+ */
 export async function startStdioServer(db: Database): Promise<void> {
   const server = createRecallMcpServer(db);
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  await new Promise<void>((resolve) => {
+    const prev = transport.onclose;
+    transport.onclose = () => {
+      prev?.();
+      resolve();
+    };
+  });
 }
