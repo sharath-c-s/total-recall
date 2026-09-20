@@ -1,0 +1,24 @@
+{
+  "name": "total-recall",
+  "version": "0.1.0",
+  "description": "Local-first, cross-agent memory tool: indexes coding-agent session transcripts into one SQLite database with FTS5 full-text search.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "recall": "bin/recall.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "recall": "bun run bin/recall.ts"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2"
+  }
+}

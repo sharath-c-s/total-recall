@@ -1,0 +1,5 @@
+node_modules/
+recall.db*
+.total-recall/
+.orchestration/
+*.log
