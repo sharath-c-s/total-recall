@@ -76,6 +76,10 @@ export interface SearchHit {
   title: string | null;
   snippet: string;
   rank: number;
+  /** jev's classification label (events only, opt-in via `recall enrich`), when present. */
+  type?: string;
+  /** jev's importance score (events only, opt-in via `recall enrich`), when present. */
+  importance?: number;
 }
 
 /** Filters accepted by `search()` and the `recall search` command. */
@@ -85,4 +89,8 @@ export interface SearchFilters {
   type?: string;
   since?: number;
   limit?: number;
+  /** jev `jev_type` classification label (events only). */
+  kind?: string;
+  /** Minimum jev `jev_importance` score, inclusive (events only). */
+  minImportance?: number;
 }

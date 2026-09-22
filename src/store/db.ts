@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { Event, Observation, SearchFilters, SearchHit, SessionRow } from "../types.ts";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const SCHEMA_PATH = join(import.meta.dir, "schema.sql");
 
 /** Default DB path is `~/.total-recall/recall.db`; `TOTAL_RECALL_DB` overrides it. */
@@ -29,11 +29,35 @@ export function openDb(path: string = defaultDbPath()): Database {
 }
 
 /**
- * Applies schema.sql once per schema_versions bump. Re-running is a no-op (all DDL is IF NOT EXISTS).
- * This only covers additive changes (new tables/indexes); a non-additive migration (column rename/drop,
- * type change) needs its own explicit ALTER step here, not just a SCHEMA_VERSION bump, since IF NOT EXISTS
- * DDL will silently no-op against an already-existing, differently-shaped table.
+ * Adds the jev enrichment columns to `events` (schema v2). Guarded via
+ * `PRAGMA table_info` because SQLite has no `ADD COLUMN IF NOT EXISTS`: a fresh
+ * install already has these columns (they're in schema.sql's CREATE TABLE), so
+ * the ALTERs must no-op there instead of throwing a duplicate-column error.
  */
+function migrateJevColumns(db: Database): void {
+  const columns = new Set(
+    (db.query("PRAGMA table_info(events)").all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  if (!columns.has("jev_type")) db.exec("ALTER TABLE events ADD COLUMN jev_type TEXT;");
+  if (!columns.has("jev_importance")) db.exec("ALTER TABLE events ADD COLUMN jev_importance REAL;");
+  if (!columns.has("jev_confidence")) db.exec("ALTER TABLE events ADD COLUMN jev_confidence REAL;");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_events_jev_type ON events(jev_type);");
+}
+
+/**
+ * One migration step per schema version, run in order for every version between
+ * the DB's current `applied` version (exclusive) and `SCHEMA_VERSION` (inclusive).
+ * Version 1 is schema.sql itself (all IF NOT EXISTS DDL, safe to re-run). Later,
+ * non-additive versions (column add/rename/drop, type change) get their own
+ * explicit step here, since IF NOT EXISTS DDL alone would silently no-op against
+ * an already-existing, differently-shaped table.
+ */
+const MIGRATIONS: Record<number, (db: Database) => void> = {
+  1: (db) => db.exec(readFileSync(SCHEMA_PATH, "utf8")),
+  2: migrateJevColumns,
+};
+
+/** Applies schema_versions-tracked migrations up to SCHEMA_VERSION. Re-running is a no-op. */
 function applySchema(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_versions (
@@ -41,15 +65,11 @@ function applySchema(db: Database): void {
       applied_at INTEGER NOT NULL
     );
   `);
-  const applied = (db.query("SELECT MAX(version) as v FROM schema_versions").get() as { v: number | null })?.v;
-  if (applied !== null && applied !== undefined && applied >= SCHEMA_VERSION) {
-    return;
+  const applied = (db.query("SELECT MAX(version) as v FROM schema_versions").get() as { v: number | null })?.v ?? 0;
+  for (let v = applied + 1; v <= SCHEMA_VERSION; v++) {
+    MIGRATIONS[v]?.(db);
+    db.query("INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)").run(v, Date.now());
   }
-  db.exec(readFileSync(SCHEMA_PATH, "utf8"));
-  db.query("INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)").run(
-    SCHEMA_VERSION,
-    Date.now(),
-  );
 }
 
 export function insertSession(db: Database, s: Omit<SessionRow, "id">): number {
@@ -214,6 +234,8 @@ interface EventSearchRow {
   title: string;
   snippet: string;
   rank: number;
+  jevType: string | null;
+  jevImportance: number | null;
 }
 
 interface ObservationSearchRow {
@@ -245,11 +267,14 @@ export function search(db: Database, query: string, filters: SearchFilters = {})
     { column: "e.ts", op: ">=", value: filters.since },
     // `type` maps to event role for events_fts (no separate type column on events).
     { column: "e.role", value: filters.type },
+    { column: "e.jev_type", value: filters.kind },
+    { column: "e.jev_importance", op: ">=", value: filters.minImportance },
   ]);
   try {
     const eventRows = db
       .query(
         `SELECT e.id as id, e.agent as agent, e.project as project, e.ts as ts, e.role as title,
+                e.jev_type as jevType, e.jev_importance as jevImportance,
                 snippet(events_fts, -1, '[', ']', '...', 10) as snippet,
                 bm25(events_fts) as rank
          FROM events_fts
@@ -260,7 +285,18 @@ export function search(db: Database, query: string, filters: SearchFilters = {})
       )
       .all(matchQuery, ...eventWhere.params, limit) as EventSearchRow[];
     for (const r of eventRows) {
-      hits.push({ source: "events", id: r.id, agent: r.agent, project: r.project, ts: r.ts, title: r.title, snippet: r.snippet, rank: r.rank });
+      hits.push({
+        source: "events",
+        id: r.id,
+        agent: r.agent,
+        project: r.project,
+        ts: r.ts,
+        title: r.title,
+        snippet: r.snippet,
+        rank: r.rank,
+        type: r.jevType ?? undefined,
+        importance: r.jevImportance ?? undefined,
+      });
     }
   } catch {
     // Invalid/unsupported FTS5 query syntax: no event hits rather than a crash.

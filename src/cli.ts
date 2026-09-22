@@ -12,6 +12,7 @@ const COMMANDS = [
   "export",
   "ask",
   "summarize",
+  "enrich",
 ] as const;
 
 export interface Command {

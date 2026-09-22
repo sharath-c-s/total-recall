@@ -87,6 +87,72 @@ describe("search filters", () => {
   });
 });
 
+describe("search: kind + minImportance filters (events only, populated by `recall enrich`)", () => {
+  test("kind and minImportance restrict to jev-enriched events", () => {
+    const sessionId = insertSession(db, {
+      agent: "claude-code",
+      project: "proj-enrich",
+      cwd: null,
+      gitBranch: null,
+      startedAt: null,
+      endedAt: null,
+      sourcePath: "/fake/enrich-session.jsonl",
+    });
+
+    const bug = insertEvent(db, {
+      sessionId,
+      agent: "claude-code",
+      project: "proj-enrich",
+      ts: 10,
+      role: "assistant",
+      tool: null,
+      text: "widget rocket zephyr bugfix",
+      toolInput: null,
+      toolOutput: null,
+      toolOutputBytes: null,
+      contentHash: contentHash("assistant", "widget rocket zephyr bugfix"),
+    });
+    db.query("UPDATE events SET jev_type = ?, jev_importance = ?, jev_confidence = ? WHERE id = ?").run(
+      "bugfix",
+      5,
+      0.9,
+      bug.id,
+    );
+
+    const discovery = insertEvent(db, {
+      sessionId,
+      agent: "claude-code",
+      project: "proj-enrich",
+      ts: 20,
+      role: "assistant",
+      tool: null,
+      text: "widget rocket zephyr discovery",
+      toolInput: null,
+      toolOutput: null,
+      toolOutputBytes: null,
+      contentHash: contentHash("assistant", "widget rocket zephyr discovery"),
+    });
+    db.query("UPDATE events SET jev_type = ?, jev_importance = ?, jev_confidence = ? WHERE id = ?").run(
+      "discovery",
+      1,
+      0.9,
+      discovery.id,
+    );
+
+    const kindHits = search(db, "widget rocket zephyr", { kind: "bugfix" });
+    expect(kindHits.length).toBe(1);
+    expect(kindHits[0].type).toBe("bugfix");
+    expect(kindHits[0].importance).toBe(5);
+
+    const importanceHits = search(db, "widget rocket zephyr", { minImportance: 3 });
+    expect(importanceHits.length).toBe(1);
+    expect(importanceHits[0].type).toBe("bugfix");
+
+    const both = search(db, "widget rocket zephyr", { kind: "discovery", minImportance: 3 });
+    expect(both.length).toBe(0);
+  });
+});
+
 describe("search: special FTS5 characters do not crash (BLOCKER regression)", () => {
   test("a colon in the query is treated as a literal token", () => {
     expect(() => search(db, "foo: bar")).not.toThrow();

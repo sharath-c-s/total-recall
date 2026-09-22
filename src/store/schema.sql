@@ -35,7 +35,11 @@ CREATE TABLE IF NOT EXISTS events (
   tool_input TEXT,
   tool_output TEXT,
   tool_output_bytes INTEGER,
-  content_hash TEXT NOT NULL
+  content_hash TEXT NOT NULL,
+  -- Opt-in jev enrichment (schema v2, `recall enrich`); null until enriched.
+  jev_type TEXT,
+  jev_importance REAL,
+  jev_confidence REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
@@ -43,6 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_events_agent ON events(agent);
 CREATE INDEX IF NOT EXISTS idx_events_project ON events(project);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_events_content_hash ON events(content_hash);
+CREATE INDEX IF NOT EXISTS idx_events_jev_type ON events(jev_type);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
   role,

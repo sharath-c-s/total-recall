@@ -25,6 +25,8 @@ export interface SearchToolArgs {
   type?: string;
   since?: number;
   limit?: number;
+  kind?: string;
+  minImportance?: number;
 }
 
 /** `search` tool handler: thin wrapper over `db.search()` so tests can call it without a transport. */
@@ -35,6 +37,8 @@ export function searchTool(db: Database, args: SearchToolArgs): SearchHit[] {
   if (args.type) filters.type = args.type;
   if (args.since !== undefined) filters.since = args.since;
   if (args.limit !== undefined) filters.limit = args.limit;
+  if (args.kind) filters.kind = args.kind;
+  if (args.minImportance !== undefined) filters.minImportance = args.minImportance;
   return dbSearch(db, args.query, filters);
 }
 
@@ -156,6 +160,14 @@ export function createRecallMcpServer(db: Database): McpServer {
         type: z.string().optional().describe("Restrict by event role (user/assistant/tool) or observation type."),
         since: z.number().optional().describe("Only rows at or after this timestamp (epoch, same units as stored ts)."),
         limit: z.number().int().positive().optional().describe("Max results to return (default 20)."),
+        kind: z
+          .string()
+          .optional()
+          .describe("Restrict to events jev-classified with this kind (e.g. 'bugfix'); requires `recall enrich`."),
+        minImportance: z
+          .number()
+          .optional()
+          .describe("Restrict to events with a jev importance score at or above this value; requires `recall enrich`."),
       },
     },
     async (args) => {

@@ -98,6 +98,58 @@ describe("sessions + events", () => {
   });
 });
 
+describe("schema migration (v1 -> v2 jev columns)", () => {
+  const MIGRATION_DB_PATH = "/tmp/total-recall-test-migration.sqlite";
+
+  afterEach(() => {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      if (existsSync(MIGRATION_DB_PATH + suffix)) rmSync(MIGRATION_DB_PATH + suffix);
+    }
+  });
+
+  test("openDb adds jev columns to an existing v1 database (non-additive migration runs on upgrade)", () => {
+    // Seed a v1-shaped DB directly: schema_versions already at 1, events table without jev_* columns.
+    const seed = new Database(MIGRATION_DB_PATH, { create: true });
+    seed.exec(`
+      CREATE TABLE schema_versions (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+      INSERT INTO schema_versions (version, applied_at) VALUES (1, 0);
+      CREATE TABLE events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER,
+        agent TEXT NOT NULL,
+        project TEXT,
+        ts INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        tool TEXT,
+        text TEXT,
+        tool_input TEXT,
+        tool_output TEXT,
+        tool_output_bytes INTEGER,
+        content_hash TEXT NOT NULL
+      );
+    `);
+    seed.close();
+
+    const migrated = openDb(MIGRATION_DB_PATH);
+    const columns = (migrated.query("PRAGMA table_info(events)").all() as Array<{ name: string }>).map(
+      (c) => c.name,
+    );
+    expect(columns).toContain("jev_type");
+    expect(columns).toContain("jev_importance");
+    expect(columns).toContain("jev_confidence");
+
+    const versions = (migrated.query("SELECT version FROM schema_versions ORDER BY version").all() as Array<{
+      version: number;
+    }>).map((v) => v.version);
+    expect(versions).toContain(2);
+
+    // Idempotent: re-opening must not throw (duplicate ALTER guarded).
+    migrated.close();
+    const reopened = openDb(MIGRATION_DB_PATH);
+    reopened.close();
+  });
+});
+
 describe("ingest_cursors", () => {
   test("upsertCursor then getCursor roundtrip", () => {
     expect(getCursor(db, "claude-code", "/fake/a.jsonl")).toBeNull();

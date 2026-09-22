@@ -2,7 +2,7 @@ import { openDb } from "../store/db.ts";
 import { renderSearch } from "../search.ts";
 import type { SearchFilters } from "../types.ts";
 
-/** `recall search "<q>" [--agent] [--project] [--type] [--since] [--limit]` */
+/** `recall search "<q>" [--agent] [--project] [--type] [--since] [--limit] [--kind] [--min-importance]` */
 export function run(args: string[]): void {
   const positional: string[] = [];
   const filters: SearchFilters = {};
@@ -25,6 +25,12 @@ export function run(args: string[]): void {
       case "--limit":
         filters.limit = Number(args[++i]);
         break;
+      case "--kind":
+        filters.kind = args[++i];
+        break;
+      case "--min-importance":
+        filters.minImportance = Number(args[++i]);
+        break;
       default:
         positional.push(arg);
     }
@@ -32,7 +38,9 @@ export function run(args: string[]): void {
 
   const query = positional.join(" ").trim();
   if (!query) {
-    console.error('Usage: recall search "<query>" [--agent] [--project] [--type] [--since] [--limit]');
+    console.error(
+      'Usage: recall search "<query>" [--agent] [--project] [--type] [--since] [--limit] [--kind] [--min-importance]',
+    );
     process.exit(1);
   }
 
